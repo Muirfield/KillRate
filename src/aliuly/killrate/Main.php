@@ -17,22 +17,27 @@ use pocketmine\event\entity\EntityDeathEvent;
 use pocketmine\event\player\PlayerDeathEvent;
 use pocketmine\entity\Projectile;
 
+use pocketmine\event\block\SignChangeEvent;
+use pocketmine\event\player\PlayerInteractEvent;
+use pocketmine\block\Block;
+use pocketmine\tile\Sign;
+use pocketmine\network\protocol\EntityDataPacket;
+use pocketmine\network\protocol\TileEntityDataPacket;
+use pocketmine\nbt\NBT;
+use pocketmine\nbt\tag\Compound;
+use pocketmine\nbt\tag\String;
+
+use aliuly\killrate\common\mc;
+use aliuly\killrate\common\MPMU;
+use aliuly\killrate\common\PluginCallbackTask;
+
 class Main extends PluginBase implements CommandExecutor,Listener {
 	protected $dbm;
 	protected $cfg;
 	protected $money;
+	protected $stats;
+	protected $api;
 
-	// Access and other permission related checks
-	private function access(CommandSender $sender, $permission) {
-		if($sender->hasPermission($permission)) return true;
-		$sender->sendMessage("You do not have permission to do that.");
-		return false;
-	}
-	private function inGame(CommandSender $sender,$msg = true) {
-		if ($sender instanceof Player) return true;
-		if ($msg) $sender->sendMessage("You can only use this command in-game");
-		return false;
-	}
 	//////////////////////////////////////////////////////////////////////
 	//
 	// Standard call-backs
@@ -40,45 +45,116 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	//////////////////////////////////////////////////////////////////////
 	public function onEnable(){
 		if (!is_dir($this->getDataFolder())) mkdir($this->getDataFolder());
+		mc::plugin_init($this,$this->getFile());
+
 		$this->getServer()->getPluginManager()->registerEvents($this, $this);
-		$this->dbm = new DatabaseManager($this->getDataFolder()."stats.sqlite3");
 		$defaults = [
+			"version" => $this->getDescription()->getVersion(),
 			"settings" => [
 				"points" => true,
 				"rewards" => true,
 				"creative" => false,
+				"dynamic-updates" => 80,
+				"reset-on-death" => false,
+				"kill-streak" => false,
+				"pop-up" => false,
 			],
 			"values" => [
 				"*" => [ 1, 10 ],	// Default
 				"Player" => [ 100, 100 ],
 			],
+			"formats" => [
+				"default" => "{sname} {count}",
+				"names" => "{n}.{player}",
+				"scores" => "{count}",
+			],
+			"backend" => "SQLiteMgr",
+			"MySql" => [
+				"comment" => "Only used if backend = MySqlMgr",
+				"host" => "localhost",
+				"user" => "nobody",
+				"password" => "secret",
+				"database" => "KillRateDb",
+				"port" => 3306,
+			],
+			"signs" => [
+				"[STATS]" => "stats",
+				"[ONLINE TOPS]" => "online-tops",
+				"[RANKINGS]" => "rankings",
+				"[RANKNAMES]" => "rankings-names",
+				"[RANKPOINTS]" => "rankings-points",
+				"[TOPNAMES]" => "online-top-names",
+				"[TOPPOINTS]" => "online-top-points",
+			],
 		];
 		$this->cfg = (new Config($this->getDataFolder()."config.yml",
 										 Config::YAML,$defaults))->getAll();
-
+		$backend = __NAMESPACE__."\\".$this->cfg["backend"];
+		$this->dbm = new $backend($this);
+		if ($this->cfg["backend"] != "SQLiteMgr") {
+			$this->getLogger()->warning(TextFormat::RED.mc::_("Using %1% backend is untested",$this->cfg["backend"]));
+			$this->getLogger()->warning(TextFormat::RED.mc::_("Please report bugs"));
+		} else {
+			$this->getLogger()->info(mc::_("Using %1% as backend",
+													 $this->cfg["backend"]));
+		}
 		$pm = $this->getServer()->getPluginManager();
 		if(!($this->money = $pm->getPlugin("PocketMoney"))
 			&& !($this->money = $pm->getPlugin("GoldStd"))
 			&& !($this->money = $pm->getPlugin("EconomyAPI"))
 			&& !($this->money = $pm->getPlugin("MassiveEconomy"))){
-			$this->getLogger()->info(TextFormat::RED.
-											 "# MISSING MONEY API PLUGIN");
-			$this->getLogger()->info(TextFormat::BLUE.
-											 ". Please install one of the following:");
-			$this->getLogger()->info(TextFormat::WHITE.
-											 "* GoldStd");
-			$this->getLogger()->info(TextFormat::WHITE.
-											 "* PocketMoney");
-			$this->getLogger()->info(TextFormat::WHITE.
-											 "* EconomyAPI or");
-			$this->getLogger()->info(TextFormat::WHITE.
-											 "* MassiveEconomy");
+			$this->getLogger()->error(TextFormat::RED.
+											 mc::_("# MISSING MONEY API PLUGIN"));
+			$this->getLogger()->error(TextFormat::BLUE.
+											 mc::_(". Please install one of the following:"));
+			$this->getLogger()->error(TextFormat::WHITE.
+											 mc::_("* GoldStd"));
+			$this->getLogger()->error(TextFormat::WHITE.
+											 mc::_("* PocketMoney"));
+			$this->getLogger()->error(TextFormat::WHITE.
+											 mc::_("* EconomyAPI or"));
+			$this->getLogger()->error(TextFormat::WHITE.
+											 mc::_("* MassiveEconomy"));
 		} else {
-			$this->getLogger()->info(TextFormat::BLUE."Using money API from ".
-											 TextFormat::WHITE.$this->money->getName()." v".
-											 $this->money->getDescription()->getVersion());
+			$this->getLogger()->info(TextFormat::BLUE.
+											 mc::_("Using money API from %1%",
+													 TextFormat::WHITE.$this->money->getName()." v".$this->money->getDescription()->getVersion()));
+		}
+		if ($this->cfg["settings"]["dynamic-updates"]
+			 && $this->cfg["settings"]["dynamic-updates"] > 0) {
+			$this->getServer()->getScheduler()->scheduleRepeatingTask(new PluginCallbackTask($this,[$this,"updateTimer"],[]),$this->cfg["settings"]["dynamic-updates"]);
+		}
+		if (MPMU::apiVersion("1.12.0")) {
+			if (MPMU::apiVersion(">1.12.0")) {
+				$this->getLogger()->warning(TextFormat::YELLOW.
+													 mc::_("This plugin has not been tested to run on %1%", MPMU::apiVersion()));
+			}
+			$this->api = 12;
+		} else {
+			$this->api = 10;
+		}
+
+		$this->stats = [];
+		if ($this->cfg["settings"]["pop-up"]) {
+			$this->getLogger()->warning(TextFormat::YELLOW.mc::_("Using deprecated pop-up feature"));
+			if ($this->api >= 12) {
+				$this->getServer()->getScheduler()->scheduleRepeatingTask(new ShowMessageTask($this), 15);
+			} else {
+				$this->getLogger()->warning(TextFormat::RED.
+												 mc::_("Pop-ups only available on PMv1.5+"));
+				$this->getLogger()->warning(TextFormat::RED.mc::_("Feature DISABLED"));
+			}
 		}
 	}
+	public function onDisable() {
+		$this->dbm->close();
+		$this->dbm = null;
+	}
+
+	public function getCfg($key) {
+		return $this->cfg[$key];
+	}
+
 	public function onCommand(CommandSender $sender, Command $cmd, $label, array $args) {
 		switch($cmd->getName()) {
 			case "killrate":
@@ -86,16 +162,16 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 				$scmd = strtolower(array_shift($args));
 				switch ($scmd) {
 					case "stats":
-						if (!$this->access($sender,"killrate.cmd.stats")) return true;
+						if (!MPMU::access($sender,"killrate.cmd.stats")) return true;
 						return $this->cmdStats($sender,$args);
 					case "top":
 					case "ranking":
-						if (!$this->access($sender,"killrate.cmd.rank")) return true;
+						if (!MPMU::access($sender,"killrate.cmd.rank")) return true;
 						return $this->cmdTops($sender,$args);
 					case "help":
 						return $this->cmdHelp($sender,$args);
 					default:
-						$sender->sendMessage("Unknown command.  Try /killrate help");
+						$sender->sendMessage(mc::_("Unknown command.  Try /killrate help"));
 						return false;
 				}
 		}
@@ -108,23 +184,24 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	//////////////////////////////////////////////////////////////////////
 	private function cmdHelp(CommandSender $sender,$args) {
 		$cmds = [
-			"stats" => ["[player ...]","Show player scores"],
-			"top" => ["[online]","Show top  players"],
+			"stats" => ["[player ...]",mc::_("Show player scores")],
+			"top" => ["[online]",mc::_("Show top players")],
 		];
 		if (count($args)) {
 			foreach ($args as $c) {
 				if (isset($cmds[$c])) {
 					list($a,$b) = $cmds[$c];
-					$sender->sendMessage(TextFormat::RED."Usage: /killrate $c $a"
-												.TextFormat::RESET);
+					$sender->sendMessage(TextFormat::RED.
+												mc::_("Usage: /killrate %1% %2%",$c,$a).
+												TextFormat::RESET);
 					$sender->sendMessage($b);
 				} else {
-					$sender->sendMessage("Unknown command $c");
+					$sender->sendMessage(mc::_("Unknown command %1%",$c));
 				}
 			}
 			return true;
 		}
-		$sender->sendMessage("KillRate sub-commands");
+		$sender->sendMessage(mc::_("KillRate sub-commands"));
 		foreach ($cmds as $a => $b) {
 			$sender->sendMessage("- ".TextFormat::GREEN."/killrate ".$a.
 										TextFormat::RESET." ".$b[0]);
@@ -152,11 +229,11 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		} else {
 			$res = $this->getRankings(5,true);
 			if ($res == null) {
-				$c->sendMessage("Not enough on-line players");
+				$c->sendMessage(mc::_("Not enough on-line players"));
 				return true;
 			}
 		}
-		$c->sendMessage(". Player Points");
+		$c->sendMessage(mc::_(". Player Points"));
 		$i = 1;
 		foreach ($res as $r) {
 			$c->sendMessage(implode(" ",[$i++,$r["player"],$r["count"]]));
@@ -165,16 +242,16 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	}
 	private function cmdStats(CommandSender $c,$args) {
 		if (count($args) == 0) {
-			if (!$this->inGame($c)) return true;
+			if (!MPMU::inGame($c)) return true;
 			$args = [ $c->getName() ];
 		}
 		foreach ($args as $pl) {
-			if ($this->inGame($c,false) && $pl != $c->getName()) {
-				if (!$this->access($c,"killrate.cmd.stats.other")) return true;
+			if (MPMU::inGame($c,false) && $pl != $c->getName()) {
+				if (!MPMU::access($c,"killrate.cmd.stats.other")) return true;
 			}
 			$score = $this->dbm->getScores($pl);
 			if ($score == null) {
-				$c->sendMessage("No scores found for $pl");
+				$c->sendMessage(mc::_("No scores found for %1%",$pl));
 				continue;
 			} else {
 				if (count($args) != 1) $c->sendMessage(TextFormat::BLUE.$pl);
@@ -216,7 +293,7 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		if(!$this->money) return false;
 		switch($this->money->getName()){
 			case "GoldStd":
-				$this->money->getMoney($p, $money);
+				return $this->money->getMoney($player);
 				break;
 			case "PocketMoney":
 			case "MassiveEconomy":
@@ -236,16 +313,24 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	public function announce($pp,$points,$money) {
 		if ($points) {
 			if ($points > 0) {
-				$pp->sendMessage("$points points awarded!");
+				$pp->sendMessage(TextFormat::BLUE.mc::n(mc::_("one point awarded!"),
+											  mc::_("%1% points awarded!",$points),
+											  $points));
 			} else {
-				$pp->sendMessage("$points points deducted!");
+				$pp->sendMessage(TextFormat::RED.mc::n(mc::_("one point deducted!"),
+											  mc::_("%1% points deducted!",$points),
+											  $points));
 			}
 		}
 		if ($money) {
 			if ($money > 0) {
-				$pp->sendMessage("You earn $money!");
+				$pp->sendMessage(TextFormat::GREEN.mc::n(mc::_("You earn \$1"),
+											  mc::_("You earn \$%1%", $money), $money));
+
 			} else {
-				$pp->sendMessage("You have been fined $money!");
+				$pp->sendMessage(TextFormat::YELLOW.mc::n(mc::_("You are fined \$1"),
+											  mc::_("You are fined \$%1%",$money),
+											  $money));
 			}
 		}
 	}
@@ -254,9 +339,11 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		$score = $this->dbm->getScore($perp,$vic);
 		if ($score) {
 			$this->dbm->updateScore($perp,$vic,$score["count"]+$incr);
-		} else {
-			$this->dbm->insertScore($perp,$vic,$incr);
+			return $score["count"]+$incr;
 		}
+		$this->dbm->insertScore($perp,$vic,$incr);
+		return $incr;
+
 	}
 	public function getPrizes($vic) {
 		if (isset($this->cfg["values"][$vic])) {
@@ -299,7 +386,17 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	public function deadDealer($pv) {
 		if ($pv instanceof Player) {
 			// Score that this player died!
-			$this->updateDb($pv->getName(),"deaths");
+			$deaths = $this->updateDb($pv->getName(),"deaths");
+			if ($this->cfg["settings"]["reset-on-death"]
+				 && $this->cfg["settings"]["reset-on-death"] > 0) {
+				if ($deaths >= $this->cfg["settings"]["reset-on-death"]) {
+					// We died too many times... reset scores...
+					$this->dbm->delScore($pv->getName());
+				}
+			}
+			if ($this->cfg["settings"]["kill-streak"]) {
+				$this->dbm->delScore($pv->getName(),"streak");
+			}
 		}
 		$cause = $pv->getLastDamageCause();
 		// If we don't know the real cause, we can score it!
@@ -328,10 +425,176 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		$vic = $pv->getName();
 		if ($pv instanceof Player) {
 			$vic = "Player";
+			// OK killed a player... check for a kill streak...
+			$pv->sendMessage(TextFormat::RED.mc::_("You were killed by %1%!",
+																$pp->getName()));
+			if ($this->cfg["settings"]["kill-streak"]) {
+				$streak = $this->updateDb($perp,"streak");
+				if ($streak > $this->cfg["settings"]["kill-streak"]) {
+					$this->getServer()->broadcastMessage(TextFormat::YELLOW.mc::_("%1% has a %2% kill streak",$pp->getName(),$streak));
+				}
+			}
 		}
 		$perp = $pp->getName();
 		list ($points,$money) = $this->updateScores($perp,$vic);
 		$this->announce($pp,$points,$money);
 	}
+	//////////////////////////////////////////////////////////////////////
+	//
+	// Sign related functionality
+	//
+	//////////////////////////////////////////////////////////////////////
+	public function playerTouchSign(PlayerInteractEvent $ev){
+		if($ev->getBlock()->getId() != Block::SIGN_POST &&
+			$ev->getBlock()->getId() != Block::WALL_SIGN) return;
+		$tile = $ev->getPlayer()->getLevel()->getTile($ev->getBlock());
+		if(!($tile instanceof Sign)) return;
+		$sign = $tile->getText();
+		if (!isset($this->cfg["signs"][$sign[0]])) return;
+		$pl = $ev->getPlayer();
+		if (!MPMU::access($pl,"killrate.signs.use")) return;
+		$this->stats = [];
+		$this->activateSign($pl,$tile);
+	}
+	public function placeSign(SignChangeEvent $ev){
+		if($ev->getBlock()->getId() != Block::SIGN_POST &&
+			$ev->getBlock()->getId() != Block::WALL_SIGN) return;
+		$tile = $ev->getPlayer()->getLevel()->getTile($ev->getBlock());
+		if(!($tile instanceof Sign)) return;
+		$sign = $ev->getLines();
+		if (!isset($this->cfg["signs"][$sign[0]])) return;
+		$pl = $ev->getPlayer();
+		if (!MPMU::access($pl,"killrate.signs.place")) {
+			$l = $pl->getLevel();
+			$l->setBlockIdAt($tile->getX(),$tile->getY(),$tile->getZ(),Block::AIR);
+			$l->setBlockDataAt($tile->getX(),$tile->getY(),$tile->getZ(),0);
+			$tile->close();
+			return;
+		}
+		$pl->sendMessage(mc::_("Placed [KillRate] sign"));
+		$this->stats = [];
+		$this->getServer()->getScheduler()->scheduleDelayedTask(new PluginCallbackTask($this,[$this,"updateTimer"],[]),10);
+	}
+	public function updateTimer() {
+		$this->stats = [];
 
+		foreach ($this->getServer()->getLevels() as $lv) {
+			if (count($lv->getPlayers()) == 0) continue;
+			foreach ($lv->getTiles() as $tile) {
+				if (!($tile instanceof Sign)) continue;
+				$sign = $tile->getText();
+				if (!isset($this->cfg["signs"][$sign[0]])) continue;
+				foreach ($lv->getPlayers() as $pl) {
+					$this->activateSign($pl,$tile);
+				}
+			}
+		}
+	}
+	private function updateSign($pl,$tile,$text) {
+		switch($this->api) {
+			case 10:
+				$pk = new EntityDataPacket();
+				break;
+			case 12:
+				$pk = new TileEntityDataPacket();
+				break;
+			default:
+				return;
+		}
+		$data = $tile->getSpawnCompound();
+		$data->Text1 = new String("Text1",$text[0]);
+		$data->Text2 = new String("Text2",$text[1]);
+		$data->Text3 = new String("Text3",$text[2]);
+		$data->Text4 = new String("Text4",$text[3]);
+		$nbt = new NBT(NBT::LITTLE_ENDIAN);
+		$nbt->setData($data);
+
+		$pk->x = $tile->getX();
+		$pk->y = $tile->getY();
+		$pk->z = $tile->getZ();
+		$pk->namedtag = $nbt->write();
+		$pl->dataPacket($pk);
+	}
+	public function activateSign($pl,$tile) {
+		$sign = $tile->getText();
+		$mode = $this->cfg["signs"][$sign[0]];
+		switch ($mode) {
+			case "stats":
+				$name = $pl->getName();
+				$text = ["","","",""];
+				$text[0] = mc::_("Stats: %1%",$name);
+
+				$l = 1;
+				foreach (["Player"=>mc::_("Kills: "),
+							 "points"=>mc::_("Points: ")] as $i=>$j) {
+					$score = $this->dbm->getScore($name,$i);
+					if ($score) {
+						$score = $score["count"];
+					} else {
+						$score = "N/A";
+					}
+					$text[$l++] = $j.$score;
+				}
+				$text[$l++] = mc::_("Money: ").$this->getMoney($name);
+				break;
+			case "online-tops":
+				$text = $this->topSign(true,"default",mc::_("Top Online"),$sign);
+				break;
+			case "rankings":
+				$text = $this->topSign(false,"default",mc::_("Top Players"),$sign);
+				break;
+			case "rankings-names":
+				$text = $this->topSign(false,"names",mc::_("Top Names"),$sign);
+				break;
+			case "rankings-points":
+				$text = $this->topSign(false,"scores",mc::_("Top Scores"),$sign);
+				break;
+			case "online-top-names":
+				$text = $this->topSign(true,"names",mc::_("On-line Names"),$sign);
+				break;
+			case "online-top-points":
+				$text = $this->topSign(true,"scores",mc::_("On-line Scores"),$sign);
+				break;
+			default:
+				return;
+
+		}
+		$this->updateSign($pl,$tile,$text);
+	}
+	public function getScore($pl,$type = "points") {
+		$score = $this->dbm->getScore($pl->getName(),$type);
+		if ($score) return $score["count"];
+		return 0;
+	}
+
+	protected function topSign($mode,$fmt,$title,$sign) {
+		$col = "points";
+		if ($sign[1] != "") $title = $sign[1];
+		if ($sign[2] != "") $col = $sign[2];
+		if ($sign[3] != "" && isset($this->cfg["formats"][$sign[3]])) {
+			$fmt = $this->cfg["formats"][$sign[3]];
+		} else {
+			$fmt = $this->cfg["formats"][$fmt];
+		}
+
+		$text = ["","","",""];
+		$text[0] = $title;
+		$res = $this->getRankings(3,$mode,$col);
+		if ($res == null) {
+			$text[2] = mc::_("NO STATS FOUND!");
+		} else {
+			$i = 1;
+			foreach ($res as $r) {
+				$tr = [
+					"{player}" => $r["player"],
+					"{count}" => $r["count"],
+					"{sname}" => substr($r["player"],0,8),
+					"{n}" => $i,
+				];
+				$text[$i] = strtr($fmt,$tr);
+				++$i;
+			}
+		}
+		return $text;
+	}
 }
