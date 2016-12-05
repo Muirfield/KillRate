@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/alejandroliu/pocketmine-plugins/master/Media/killrate.png" style="width:64px;height:64px" width="64" height="64"/>
+<img src="https://github.com/Muirfield/KillRate/raw/master/media/killrate.png" style="width:64px;height:64px" width="64" height="64"/>
 
 <!-- meta:Categories = Informational -->
 <!-- meta:PluginAccess = Commands, Databases, Entities, Tiles -->
@@ -21,22 +21,16 @@
 <!-- php: $v_forum_thread = "http://forums.pocketmine.net/threads/killrate.8060/"; -->
 <!-- template: prologue.md -->
 
-**DO NOT POST QUESTION/BUG-REPORTS/REQUESTS IN THE REVIEWS**
-
-It is difficult to carry a conversation in the reviews.  If you
-have a question/bug-report/request please use the
-[Thread](http://forums.pocketmine.net/threads/killrate.8060/) for
-that.  You are more likely to get a response and help that way.
 
 _NOTE:_
 
 This documentation was last updated for version **2.1.1**.
 
 Please go to
-[github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate)
+[github](https://github.com/Muirfield/KillRate)
 for the most up-to-date documentation.
 
-You can also download this plugin from this [page](https://github.com/alejandroliu/pocketmine-plugins/releases/tag/KillRate-2.1.1).
+You can also download this plugin from this [page](https://github.com/Muirfield/KillRate/releases).
 
 <!-- end-include -->
 
