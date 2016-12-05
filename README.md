@@ -8,11 +8,11 @@
 
 - Summary: Keep track of the number of kills
 - PocketMine-MP version: 1.5 (API:1.12.0)
-- DependencyPlugins: 
+- DependencyPlugins:
 - OptionalPlugins: PocketMoney, MassiveEconomy, EconomyAPI, GoldStd, RankUp
-- Categories: Informational 
-- Plugin Access: Commands, Databases, Entities, Tiles 
-- WebSite: https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate
+- Categories: Informational
+- Plugin Access: Commands, Databases, Entities, Tiles
+- WebSite: https://github.com/Muirfield/KillRate
 
 <!-- end-include -->
 
@@ -20,7 +20,6 @@
 
 <!-- php: $v_forum_thread = "http://forums.pocketmine.net/threads/killrate.8060/"; -->
 <!-- template: prologue.md -->
-
 
 _NOTE:_
 
@@ -240,9 +239,6 @@ called KillRateEx.
 It is not as plug and play as KillRate so it is only available as a script
 plugin.  This is because it requires to be customized before use.
 
-KillRateEx can be downloaded from
-[github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate)
-
 Some versions of KillRate will create a sample KillRateEx.php in the KillRate
 folder.  You then only need to copy that file to your Plugins folder.  That
 version may be out-of-date, so preferably you should download it from the link
@@ -277,6 +273,8 @@ In order to use the script extension you need to do the following:
 
 # Changes
 
+* ??
+  * Closes #35, bug reported by @legoboy0215
 * 2.1.1: Bug fixes
   * Fixed bug reported by @PolarKing
 * 2.1.0: Ranks
@@ -354,4 +352,3 @@ In order to use the script extension you need to do the following:
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 <!-- end-include -->
-

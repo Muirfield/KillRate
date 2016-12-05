@@ -16,10 +16,10 @@ use pocketmine\tile\Sign;
 use pocketmine\event\Listener;
 
 
-use pocketmine\network\protocol\TileEntityDataPacket;
+use pocketmine\network\protocol\BlockEventPacket;
 use pocketmine\nbt\NBT;
-use pocketmine\nbt\tag\Compound;
-use pocketmine\nbt\tag\String;
+use pocketmine\nbt\tag\CompoundTag;
+use pocketmine\nbt\tag\StringTag;
 
 class SignMgr implements Listener {
   protected $owner;
@@ -57,18 +57,24 @@ class SignMgr implements Listener {
 		$this->activateSign($pl,$tile);
 	}
 	public function placeSign(SignChangeEvent $ev){
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		if($ev->getBlock()->getId() != Block::SIGN_POST &&
 			$ev->getBlock()->getId() != Block::WALL_SIGN) return;
 		$tile = $ev->getPlayer()->getLevel()->getTile($ev->getBlock());
 		if(!($tile instanceof Sign)) return;
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		$sign = $ev->getLines();
 		if (!isset($this->signtxt[$sign[0]])) return;
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		$pl = $ev->getPlayer();
 		if (!MPMU::access($pl,"killrate.signs.place")) {
+			//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 			SignUtils::breakSignLater($this->owner,$tile);
 			return;
 		}
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		$pl->sendMessage(mc::_("Placed [KillRate] sign"));
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		$this->owner->getServer()->getScheduler()->scheduleDelayedTask(
       new PluginCallbackTask($this->owner,[$this,"updateTimer"],[]),
       10
@@ -87,14 +93,15 @@ class SignMgr implements Listener {
 				}
 			}
 		}
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 	}
 	private function updateSign($pl,$tile,$text) {
-		$pk = new TileEntityDataPacket();
+		$pk = new BlockEventPacket();
 		$data = $tile->getSpawnCompound();
-		$data->Text1 = new String("Text1",$text[0]);
-		$data->Text2 = new String("Text2",$text[1]);
-		$data->Text3 = new String("Text3",$text[2]);
-		$data->Text4 = new String("Text4",$text[3]);
+		$data->Text1 = new StringTag("Text1",$text[0]);
+		$data->Text2 = new StringTag("Text2",$text[1]);
+		$data->Text3 = new StringTag("Text3",$text[2]);
+		$data->Text4 = new StringTag("Text4",$text[3]);
 		$nbt = new NBT(NBT::LITTLE_ENDIAN);
 		$nbt->setData($data);
 
@@ -117,7 +124,7 @@ class SignMgr implements Listener {
 				foreach (["Player"=>mc::_("Kills: "),
 							 "points"=>mc::_("Points: ")] as $i=>$j) {
 					$score = $this->owner->getScoreV2($name,$i);
-					if ($score) {
+					if ($score && isset($score["count"])) {
 						$score = $score["count"];
 					} else {
 						$score = "N/A";

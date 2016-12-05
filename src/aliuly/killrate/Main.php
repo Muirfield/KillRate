@@ -328,6 +328,7 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		return [0,0];
 	}
 	public function updateScores($player, $perp,$vic) {
+		//echo "VIC=$vic PERP=$perp\n";//##DEBUG
 		if ($this->settings["points"] || $this->money !== null){
 			list($points,$money) = $this->getPrizes($vic);
 			if (!$this->settings["points"]) $points = false;
@@ -362,17 +363,21 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	 * @priority MONITOR
 	 */
 	public function onPlayerDeath(PlayerDeathEvent $e) {
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		$this->deadDealer($e->getEntity());
 	}
 	/**
 	 * @priority MONITOR
 	 */
 	public function onDeath(EntityDeathEvent $e) {
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		$this->deadDealer($e->getEntity());
 	}
 	public function deadDealer($pv) {
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		if ($pv instanceof Player) {
 			// Score that this player died!
+			//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 			$deaths = $this->updateDb($pv->getName(),"deaths");
 			if ($this->settings["reset-on-death"]
 				 && $this->settings["reset-on-death"] > 0) {
@@ -396,11 +401,14 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		}
 		$cause = $pv->getLastDamageCause();
 		// If we don't know the real cause, we can score it!
+		//echo __METHOD__.",".__LINE__."-".get_class($cause)."\n";//##DEBUG
 		if (!($cause instanceof EntityDamageEvent)) return;
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 
 		switch ($cause->getCause()) {
 			case EntityDamageEvent::CAUSE_PROJECTILE:
 				$pp = $cause->getDamager();
+				//echo get_class($pp)." PROJECTILE\n";//##DEBUG
 				break;
 			case EntityDamageEvent::CAUSE_ENTITY_ATTACK:
 				$pp = $cause->getDamager();
@@ -410,10 +418,13 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 				if ($pp instanceof Projectile) {
 					$pp = $pp->shootingEntity;
 				}
+				//echo get_class($pp)." EXPLOSION\n";//##DEBUG
 				break;
 			default:
+				//echo "Cause: ".$cause->getCause()."\n";//##DEBUG
 				return;
 		}
+		//echo __METHOD__.",".__LINE__."\n";//##DEBUG
 		if (!($pp instanceof Player)) return; // Not killed by player...
 		// No scoring for creative players...
 		if ($pp->isCreative() && !$this->settings["creative"]) return;
@@ -484,6 +495,7 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		$this->dbm->insertScore($pn,$type,$val);
 	}
 	public function delScore($pn, $type = null) {
+		//echo __METHOD__.",".__LINE__." pn=$pn\n";//##DEBUG
 		$this->dbm->delScore($pn, $type);
 	}
 	public function getScores($pn) {
