@@ -1,4 +1,7 @@
 <?php
+//= api-features
+//: - Multiple money support
+
 namespace aliuly\killrate\common;
 use pocketmine\Server;
 use pocketmine\plugin\PluginBase;
