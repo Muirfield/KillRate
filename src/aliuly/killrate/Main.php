@@ -1,4 +1,7 @@
 <?php
+/**
+ ** CONFIG:config.yml
+ **/
 namespace aliuly\killrate;
 
 use pocketmine\plugin\PluginBase;
@@ -26,10 +29,12 @@ use pocketmine\network\protocol\TileEntityDataPacket;
 use pocketmine\nbt\NBT;
 use pocketmine\nbt\tag\Compound;
 use pocketmine\nbt\tag\String;
+use pocketmine\Achievement;
 
 use aliuly\killrate\common\mc;
 use aliuly\killrate\common\MPMU;
 use aliuly\killrate\common\PluginCallbackTask;
+use aliuly\killrate\common\MoneyAPI;
 
 class Main extends PluginBase implements CommandExecutor,Listener {
 	protected $dbm;
@@ -44,39 +49,52 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	//
 	//////////////////////////////////////////////////////////////////////
 	public function onEnable(){
+		$this->dbm = null;
 		if (!is_dir($this->getDataFolder())) mkdir($this->getDataFolder());
 		mc::plugin_init($this,$this->getFile());
 
 		$this->getServer()->getPluginManager()->registerEvents($this, $this);
 		$defaults = [
 			"version" => $this->getDescription()->getVersion(),
+			"# settings" => "Configuration settings",
 			"settings" => [
+				"# points" => "award points.", // if true points are awarded and tracked.
 				"points" => true,
+				"# rewards" => "award money.", // if true, money is awarded.  Requires an economy plugin
 				"rewards" => true,
+				"# creative" => "track creative kills.", // if true, kills done by players in creative are scored
 				"creative" => false,
+				"# dynamic-updates" => "Update signs.", // Set to 0 or false to disable, otherwise sign update frequence in ticks
 				"dynamic-updates" => 80,
+				"# reset-on-death" => "Reset counters on death.", // set to **false** or to a number.  When the player dies that number of times, scores will reset.  (GAME OVER MAN!)
 				"reset-on-death" => false,
+				"# kill-streak" => "Enable kill-streak tracking.", // "set to **false** or to a number.  Will show the kill streak of a player once the number of kills before dying reaches number
 				"kill-streak" => false,
-				"pop-up" => false,
+				"# achievements" => "Enable PocketMine achievements",
+				"achievements" => true,
 			],
+			"# values" => "configure awards. (1st.money, 2nd.points)", // Configures how many points or how much money is awarded per kill type.  The first number is points, the second is money.  You can use negative values.
 			"values" => [
 				"*" => [ 1, 10 ],	// Default
 				"Player" => [ 100, 100 ],
 			],
+			"# formats" => "Sign formats.", // Used to show sign data
 			"formats" => [
 				"default" => "{sname} {count}",
 				"names" => "{n}.{player}",
 				"scores" => "{count}",
 			],
+			"# backend" => "Use SQLiteMgr or MySqlMgr",
 			"backend" => "SQLiteMgr",
+			"# MySql" => "MySQL settings.", // Only used if backend is MySqlMgr to configure MySql settings
 			"MySql" => [
-				"comment" => "Only used if backend = MySqlMgr",
 				"host" => "localhost",
 				"user" => "nobody",
 				"password" => "secret",
 				"database" => "KillRateDb",
 				"port" => 3306,
 			],
+			"# signs" => "placed signs text.", // These are used to configure sign texts.  Place signs with the words on the left, and the sign type (on the right) will be created
 			"signs" => [
 				"[STATS]" => "stats",
 				"[ONLINE TOPS]" => "online-tops",
@@ -89,6 +107,11 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		];
 		$this->cfg = (new Config($this->getDataFolder()."config.yml",
 										 Config::YAML,$defaults))->getAll();
+		if (version_compare($this->cfg["version"],"1.2.0") < 0) {
+			$this->getLogger()->warning(TextFormat::RED.mc::_("Configuration has been changed"));
+			$this->getLogger()->warning(mc::_("It is recommended to delete old config.yml"));
+		}
+
 		$backend = __NAMESPACE__."\\".$this->cfg["backend"];
 		$this->dbm = new $backend($this);
 		if ($this->cfg["backend"] != "SQLiteMgr") {
@@ -98,27 +121,13 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 			$this->getLogger()->info(mc::_("Using %1% as backend",
 													 $this->cfg["backend"]));
 		}
-		$pm = $this->getServer()->getPluginManager();
-		if(!($this->money = $pm->getPlugin("PocketMoney"))
-			&& !($this->money = $pm->getPlugin("GoldStd"))
-			&& !($this->money = $pm->getPlugin("EconomyAPI"))
-			&& !($this->money = $pm->getPlugin("MassiveEconomy"))){
-			$this->getLogger()->error(TextFormat::RED.
-											 mc::_("# MISSING MONEY API PLUGIN"));
-			$this->getLogger()->error(TextFormat::BLUE.
-											 mc::_(". Please install one of the following:"));
-			$this->getLogger()->error(TextFormat::WHITE.
-											 mc::_("* GoldStd"));
-			$this->getLogger()->error(TextFormat::WHITE.
-											 mc::_("* PocketMoney"));
-			$this->getLogger()->error(TextFormat::WHITE.
-											 mc::_("* EconomyAPI or"));
-			$this->getLogger()->error(TextFormat::WHITE.
-											 mc::_("* MassiveEconomy"));
-		} else {
-			$this->getLogger()->info(TextFormat::BLUE.
-											 mc::_("Using money API from %1%",
-													 TextFormat::WHITE.$this->money->getName()." v".$this->money->getDescription()->getVersion()));
+		if (isset($this->cfg["settings"]["rewards"])) {
+			$this->money = MoneyAPI::moneyPlugin($this);
+			if ($this->money) {
+				MoneyAPI::foundMoney($this,$this->money);
+			} else {
+				MoneyAPI::noMoney($this);
+			}
 		}
 		if ($this->cfg["settings"]["dynamic-updates"]
 			 && $this->cfg["settings"]["dynamic-updates"] > 0) {
@@ -135,19 +144,13 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		}
 
 		$this->stats = [];
-		if ($this->cfg["settings"]["pop-up"]) {
-			$this->getLogger()->warning(TextFormat::YELLOW.mc::_("Using deprecated pop-up feature"));
-			if ($this->api >= 12) {
-				$this->getServer()->getScheduler()->scheduleRepeatingTask(new ShowMessageTask($this), 15);
-			} else {
-				$this->getLogger()->warning(TextFormat::RED.
-												 mc::_("Pop-ups only available on PMv1.5+"));
-				$this->getLogger()->warning(TextFormat::RED.mc::_("Feature DISABLED"));
-			}
+		if ($this->cfg["settings"]["achievements"]) {
+			Achievement::add("killer","First Blood!",[]);
+			Achievement::add("serialKiller","Killer Streak!",["killer"]);
 		}
 	}
 	public function onDisable() {
-		$this->dbm->close();
+		if ($this->dbm !== null) $this->dbm->close();
 		$this->dbm = null;
 	}
 
@@ -208,21 +211,6 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		}
 		return true;
 	}
-	public function getRankings($limit=10,$online=false,$col = "points") {
-	  if ($online) {
-		  // Online players only...
-		  $plist = [];
-		  foreach ($this->getServer()->getOnlinePlayers() as $p) {
-			  $plist[] = $p->getName();
-		  }
-		  if (count($plist) < 2) return null;
-	  } else {
-		  $plist = null;
-	  }
-	  //print_r([$limit,$plist]);
-	  return $this->dbm->getTops($limit,$plist,$col);
-  }
-
 	private function cmdTops(CommandSender $c,$args) {
 		if (count($args) == 0) {
 			$res = $this->getRankings(5);
@@ -266,47 +254,6 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 
 	//////////////////////////////////////////////////////////////////////
 	//
-	// Economy/Money handlers
-	//
-	//////////////////////////////////////////////////////////////////////
-	public function grantMoney($p,$money) {
-		if(!$this->money) return false;
-		switch($this->money->getName()){
-			case "GoldStd":
-				$this->money->grantMoney($p, $money);
-				break;
-			case "PocketMoney":
-				$this->money->grantMoney($p, $money);
-				break;
-			case "EconomyAPI":
-				$this->money->setMoney($p,$this->money->mymoney($p)+$money);
-				break;
-			case "MassiveEconomy":
-				$this->money->payPlayer($p,$money);
-				break;
-			default:
-				return false;
-		}
-		return true;
-	}
-	public function getMoney($player) {
-		if(!$this->money) return false;
-		switch($this->money->getName()){
-			case "GoldStd":
-				return $this->money->getMoney($player);
-				break;
-			case "PocketMoney":
-			case "MassiveEconomy":
-				return $this->money->getMoney($player);
-			case "EconomyAPI":
-				return $this->money->mymoney($player);
-			default:
-				return false;
-				break;
-		}
-	}
-	//////////////////////////////////////////////////////////////////////
-	//
 	// Event handlers
 	//
 	//////////////////////////////////////////////////////////////////////
@@ -335,16 +282,6 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		}
 	}
 
-	public function updateDb($perp,$vic,$incr = 1) {
-		$score = $this->dbm->getScore($perp,$vic);
-		if ($score) {
-			$this->dbm->updateScore($perp,$vic,$score["count"]+$incr);
-			return $score["count"]+$incr;
-		}
-		$this->dbm->insertScore($perp,$vic,$incr);
-		return $incr;
-
-	}
 	public function getPrizes($vic) {
 		if (isset($this->cfg["values"][$vic])) {
 			return $this->cfg["values"][$vic];
@@ -357,16 +294,16 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 	public function updateScores($perp,$vic) {
 		$this->updateDb($perp,$vic);
 		$awards = [ false,false];
-		if (isset($this->cfg["settings"]["points"])) {
+		if ($this->cfg["settings"]["points"]) {
 			// Add points...
 			list($points,$money) = $this->getPrizes($vic);
 			$this->updateDb($perp,"points",$points);
 			$awards[0] = $points;
 		}
-		if (isset($this->cfg["settings"]["rewards"])) {
+		if ($this->cfg["settings"]["rewards"]) {
 			// Add money...
 			list($points,$money) = $this->getPrizes($vic);
-			$this->grantMoney($perp,$money);
+			MoneyAPI::grantMoney($this->money,$perp,$money);
 			$awards[1] = $money;
 		}
 		return $awards;
@@ -395,6 +332,23 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 				}
 			}
 			if ($this->cfg["settings"]["kill-streak"]) {
+				$n = $pv->getName();
+				$newstreak = $this->dbm->getScore($n,"streak");
+				// Keep track of the best streak ever...
+				if ($newstreak) {
+					$newstreak = $newstreak["count"];
+					$oldstreak = $this->dbm->getScore($n,"best-streak");
+					if ($oldstreak) {
+						$oldstreak = $oldstreak["count"];
+						if ($newstreak > $oldstreak) {
+							$this->dbm->updateScore($n,"best-streak",$newstreak);
+							$this->getServer()->broadcastMessage(mc::_("%1% beat previous streak record of %2% at %3% kills", $n, $oldstreak, $newstreak));
+						}
+					} else {
+						$this->dbm->insertScore($n,"best-streak",$newstreak);
+						$this->getServer()->broadcastMessage(mc::_("%1% ended his kill-streak at %2% kills", $n, $newstreak));
+					}
+				}
 				$this->dbm->delScore($pv->getName(),"streak");
 			}
 		}
@@ -421,6 +375,7 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		if (!($pp instanceof Player)) return; // Not killed by player...
 		// No scoring for creative players...
 		if ($pp->isCreative() && !isset($this->cfg["settings"]["creative"])) return;
+		if ($this->cfg["settings"]["achievements"]) $pp->awardAchievement("killer");
 		$perp = $pp->getName();
 		$vic = $pv->getName();
 		if ($pv instanceof Player) {
@@ -431,7 +386,14 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 			if ($this->cfg["settings"]["kill-streak"]) {
 				$streak = $this->updateDb($perp,"streak");
 				if ($streak > $this->cfg["settings"]["kill-streak"]) {
+					if ($this->cfg["settings"]["achievements"]) $pp->awardAchievement("serialKiller");
 					$this->getServer()->broadcastMessage(TextFormat::YELLOW.mc::_("%1% has a %2% kill streak",$pp->getName(),$streak));
+					if ($this->cfg["settings"]["rewards"]) {
+						list($points,$money) = $this->getPrizes($vic);
+						$pp->sendMessage(TextFormat::GREEN.
+											  mc::_("You earn an additional $%1% for being in kill-streak!",$money));
+						MoneyAPI::grantMoney($this->money,$perp,$money);
+					}
 				}
 			}
 		}
@@ -535,7 +497,8 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 					}
 					$text[$l++] = $j.$score;
 				}
-				$text[$l++] = mc::_("Money: ").$this->getMoney($name);
+				$text[$l++] = mc::_("Money: ").
+					MoneyAPI::getMoney($this->money,$name);
 				break;
 			case "online-tops":
 				$text = $this->topSign(true,"default",mc::_("Top Online"),$sign);
@@ -561,11 +524,6 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		}
 		$this->updateSign($pl,$tile,$text);
 	}
-	public function getScore($pl,$type = "points") {
-		$score = $this->dbm->getScore($pl->getName(),$type);
-		if ($score) return $score["count"];
-		return 0;
-	}
 
 	protected function topSign($mode,$fmt,$title,$sign) {
 		$col = "points";
@@ -576,25 +534,63 @@ class Main extends PluginBase implements CommandExecutor,Listener {
 		} else {
 			$fmt = $this->cfg["formats"][$fmt];
 		}
-
 		$text = ["","","",""];
-		$text[0] = $title;
-		$res = $this->getRankings(3,$mode,$col);
+		if ($title == "^^^") {
+			$cnt = 4;
+			$start = 0;
+		} else {
+			$text[0] = $title;
+			$cnt = 3;
+			$start = 1;
+		}
+		$res = $this->getRankings($cnt,$mode,$col);
 		if ($res == null) {
 			$text[2] = mc::_("NO STATS FOUND!");
 		} else {
-			$i = 1;
+			$i = 1; $j = $start;
 			foreach ($res as $r) {
 				$tr = [
 					"{player}" => $r["player"],
 					"{count}" => $r["count"],
 					"{sname}" => substr($r["player"],0,8),
-					"{n}" => $i,
+					"{n}" => $i++,
 				];
-				$text[$i] = strtr($fmt,$tr);
-				++$i;
+				$text[$j++] = strtr($fmt,$tr);
 			}
 		}
 		return $text;
 	}
+	//////////////////////////////////////////////////////////////////////
+	// API functions
+	//////////////////////////////////////////////////////////////////////
+	public function getRankings($limit=10,$online=false,$col = "points") {
+	  if ($online) {
+		  // Online players only...
+		  $plist = [];
+		  foreach ($this->getServer()->getOnlinePlayers() as $p) {
+			  $plist[] = $p->getName();
+		  }
+		  if (count($plist) < 2) return null;
+	  } else {
+		  $plist = null;
+	  }
+	  //print_r([$limit,$plist]);
+	  return $this->dbm->getTops($limit,$plist,$col);
+  }
+	public function updateDb($perp,$vic,$incr = 1) {
+		$score = $this->dbm->getScore($perp,$vic);
+		if ($score) {
+			$this->dbm->updateScore($perp,$vic,$score["count"]+$incr);
+			return $score["count"]+$incr;
+		}
+		$this->dbm->insertScore($perp,$vic,$incr);
+		return $incr;
+
+	}
+	public function getScore($pl,$type = "points") {
+		$score = $this->dbm->getScore($pl->getName(),$type);
+		if ($score) return $score["count"];
+		return 0;
+	}
+
 }

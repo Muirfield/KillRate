@@ -2,18 +2,39 @@
 
 # KillRate
 
-* Summary: Keep track of how much killing is going-on
-* Dependency Plugins: N/A
-* PocketMine-MP version: 1.4 - API 1.10.0
+* Summary: Keep track of the number of kills
+* PocketMine-MP version: 1.4 (API:1.10.0)
 * DependencyPlugins: -
 * OptionalPlugins: PocketMoney,MassiveEconomy,EconomyAPI,GoldStd
 * Categories: Informational
 * Plugin Access: Commands, Databases, Entities, Tile Entities
-* WebSite: [github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate)
+* WebSite: https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate
 
 ## Overview
 
-Keep track on how much killing is going-on on a server.
+<!-- php: $v_forum_thread = "http://forums.pocketmine.net/threads/killrate.8060/"; -->
+<!-- template: prologue.md -->
+
+**DO NOT POST QUESTION/BUG-REPORTS/REQUESTS IN THE REVIEWS**
+
+It is difficult to carry a conversation in the reviews.  If you
+have a question/bug-report/request please use the
+[Thread](http://forums.pocketmine.net/threads/killrate.8060/) for
+that.  You are more likely to get a response and help that way.
+
+_NOTE:_
+
+This documentation was last updated for version **1.2.3**.
+
+Please go to
+[github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate)
+for the most up-to-date documentation.
+
+You can also download this plugin from this [page](https://github.com/alejandroliu/pocketmine-plugins/releases/tag/KillRate-1.2.3).
+
+<!-- template-end -->
+
+This plugin keeps track on how much killing is going-on on a server.
 
 It may optionally use an economy plugin like for example, PocketMoney,
 to reward killing.
@@ -24,7 +45,20 @@ Basic Usage:
 * killrate stats [player] - Show the KillRate stats for [player]
 * killrate top [online] - Show top players.
 
-You can also place signs with the following text in the first line:
+You can also place signs to show game statistics.
+
+Thanks to @Daniel123 and @CaptainKenji17 for suggestions and feedback.
+
+## Documentation
+
+This plugin supports PocketMoney and GoldStd and has experimental
+support for MassiveEconomy and EconomyAPI.
+
+### Signs
+
+You can place signs showing current game statistics.  The following
+sign types are available by default, by entering the keyword
+([KEYWORD]) in **LINE1** of the sign:
 
 * [STATS] - Current player statistics
 * [RANKINGS] - Top 3 players + scores
@@ -34,17 +68,33 @@ You can also place signs with the following text in the first line:
 * [TOPNAMES] - Top 3 on-line player names
 * [TOPPOINTS] - Top 3 on-line player scores
 
-These signs will then display current statistics.  These signs can be
-further customized by adding the following:
+Signs showing top players can be further customized by adding
+additional entries in the sign text:
 
-* LINE2 - Title, first line of the sign.
-* LINE3 - What statistic to count (i.e. deaths, points, player), etc.
-* LINE4 - format line, selects a format from the config.yml formats section.
+* LINE2 - Title, this will be the first line of the sign.  If,
+  however, you set it to **"^^^"** (Three consecutive **^** signs),
+  the title will be omitted (and the sign will show a top 4).
+* LINE3 - What statistic to count.  It defaults to _points_, but it
+  can be changed to anything (for example, _deaths_, _player_, etc).
+  Essentially the value here is the word on the left when you enter
+  the command _killrate stats_.
+* LINE4 - format line, select a format out of the **config.yml**
+  file's **formats** section.
 
-## Documentation
+In the **formats** section you have:
 
-This plugin supports PocketMoney and GoldStd and has experimental
-support for MassiveEconomy and EconomyAPI.
+```
+  selector: format
+```
+
+The **selector** is a word that matches the text in **LINE4** of the
+sign.  The format can contain any text and the following variable
+substitutions:
+
+* {player} - player's name
+* {n} - rank number
+* {count} - score
+* {sname} - only the first 8 characters of the player's name
 
 ### Permission Nodes
 
@@ -58,78 +108,27 @@ support for MassiveEconomy and EconomyAPI.
 * killrate.signs.use : Allow to use KillRate signs
 
 
-## Configuration
+### Configuration
 
-These can be configured from `config.yml`:
+Configuration is through the `config.yml` file.
+The following sections are defined:
 
-```YAML
-settings:
-    points: true
-    rewards: true
-    creative: false
-    dynamic-updates: 80
-    kill-streak: false or value
-    reset-on-death: false or value
-    pop-up: false
-values:
-    zombie: [10,100]
-    Player: [100, 100]
-    '*': [0, -10]
-backend: SQLiteMgr
-MySQL:
-    host: localhost
-    user: nobody
-    password: secret
-    database: KillRateDb
-    port: 3306
-signs:
-  '[STATS]': stats
-  '[RANKINGS]': rankings
-  '[ONLINE TOPS]': online-ranks
-  '[RANKNAMES]': rankings-names
-  '[RANKPOINTS]': rankings-points
-  '[TOPNAMES]': online-top-names
-  '[TOPPOINTS]': online-top-points
-formats:
-  default: '{sname} {count}'
-  names: '{n}.{player}'
-  scores: '{count}'
-```
+#### config.yml
 
-If `creative` is set to true, kills done when the player is in
-`creative` will be counted.  The default is false, *NOT* to count
-them.
+*  settings: Configuration settings
+	*  points: award points. if true points are awarded and tracked.
+	*  rewards: award money. if true, money is awarded.  Requires an economy plugin
+	*  creative: track creative kills. if true, kills done by players in creative are scored
+	*  dynamic-updates: Update signs. Set to 0 or false to disable, otherwise sign update frequence in ticks
+	*  reset-on-death: Reset counters on death. set to **false** or to a number.  When the player dies that number of times, scores will reset.  (GAME OVER MAN!)
+	*  kill-streak: Enable kill-streak tracking. "set to **false** or to a number.  Will show the kill streak of a player once the number of kills before dying reaches number
+	*  achievements: Enable PocketMine achievements
+*  values: configure awards. (1st.money, 2nd.points) Configures how many points or how much money is awarded per kill type.  The first number is points, the second is money.  You can use negative values.
+*  formats: Sign formats. Used to show sign data
+*  backend: Use SQLiteMgr or MySqlMgr
+*  MySql: MySQL settings. Only used if backend is MySqlMgr to configure MySql settings
+*  signs: placed signs text. These are used to configure sign texts.  Place signs with the words on the left, and the sign type (on the right) will be created
 
-If `points` is true, points are awarded and tracked.  You need to
-enable `points` for the rankings to work.
-
-If `rewards` is true, money is awarded.  You need an economy plugin
-for this to work.
-
-`dynamic-updates` show in tick intervals how often signs are updated.
-
-`pop-up` will use the _pop up_ message to show the player's score.
-
-`kill-streak`: Set to `false` or to a number.  Will show the kill
-streak of a player.
-
-`reset-on-death`: Set to `false` or to a number.  When the player dies
-that number of times, scores will reset. (It is GAME OVER).
-
-`values` are used to configure how many points or how much money is
-awarded per kill type.  The first number is points, the second is
-money.  You can use negative values.
-
-`signs` are used to configure sign texts.  These texts will be used to
-identify which signs should show player stats.
-
-`formats` are used to show what data are shown in the different
-signs.  The following variables are available in these formats:
-
-* {player} - player's name
-* {n} - rank number
-* {count} - score
-* {sname} - only the first 8 characters of a name
 
 ## Translations
 
@@ -141,18 +140,65 @@ languages currently available are:
 
 You can provide your own message file by creating a file called
 `messages.ini` in the plugin config directory.  Check
-[github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate/resources/messages/)
+[github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/KillRate)
 for sample files.
 
 The contents of these "ini" files are key-value pairs:
 
 	"Base text"="Translated Text"
 
+## API
+
+The following functions are available to get information from this
+plugin:
+
+* getRankings($limit=10,$online=false,$stat = "points")
+  * $limit - the number of rows to return
+  * $online - false, all players, true, only on-line players are
+    returned
+  * $stat - the statistic you want to display
+* updateDb($player,$stat,$incr = 1)
+  * $player - the player you want to score
+  * $stat - type of statistic to update
+  * $incr - how many units to increase
+* getScore($player,$stat = "points")
+  * $player - player to look-up
+  * $stat - statistic to return
+
+To use the api:
+
+```php
+[PHP]
+$server->getPluginManager()->getPlugin("KillRate")->function()
+[/PHP]
+```
+
+## FAQ
+
+* Q: Can you score when you push people to lava (or other indirect kills)?
+* A: Only direct kills are scored.  All indirect kills (pushing people
+  to lava, causing explosions, etc) can not be scored.
+
 # Changes
 
+* 1.2.3:
+  * MySqlMgr: Fixed typo
+  * Fixed bug with setting rewards/points to false (Reported by @reidq7)
+* 1.2.2
+  * small tweaks on the comments of the config file...
+  * Added achievements
+* 1.2.1:
+  * CptKenji's features:
+    * Double money and Best streak tracking.
+  * Fixed MySql support.  It should work now.
+* 1.2.0: Bumped the version number to reflect config changes.
+  * Added the "^^^" hack.
+  * Removed pop-up scores.
+  * Improved documentation
 * 1.1.1:
   * Minor tweaks
   * Signs are more configurable
+  * **PLEASE DELETE OLD CONFIG.YML FILE**
 * 1.1.0: General improvements
   * Added experimental MySQL support
   * Messages file and translations: spanish
